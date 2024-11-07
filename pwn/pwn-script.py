@@ -1,0 +1,15 @@
+from pwn import *
+
+s = lambda data: io.send(data)
+sl = lambda data: io.sendline(data)
+sa = lambda text, data: io.sendafter(text, data)
+sla = lambda text, data: io.sendlineafter(text, data)
+r = lambda: io.recv()
+ru = lambda text: io.recvuntil(text)
+uu32 = lambda: u32(io.recvuntil(b"\xff")[-4:].ljust(4, b'\x00'))
+uu64 = lambda: u64(io.recvuntil(b"\x7f")[-6:].ljust(8, b"\x00"))
+iuu32 = lambda: int(io.recv(10), 16)
+iuu64 = lambda: int(io.recv(6), 16)
+uheap = lambda: u64(io.recv(6).ljust(8, b'\x00'))
+lg = lambda addr: log.info(addr)
+ia = lambda: io.interactive()

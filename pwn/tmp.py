@@ -1,0 +1,85 @@
+from base64 import *
+import json
+import yaml
+import re
+
+def get_data(file_url="url.txt"):
+    with open(file_url, "w") as fo:
+        data = "dm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVFWVXRRU0lzSW1Ga1pDSTZJbUYxTG1Oa2JtTnNiM1ZrTG1OdkxuVnJJaXdpY0c5eWRDSTZJakV3TlRVeklpd2lhV1FpT2lJNU1EaGxZalUzT0MweU5UVXlMVE00WlRjdFlURTBOQzA0WlRkaE56YzJNREE0TURBaUxDSmhhV1FpT2lJeUlpd2libVYwSWpvaWQzTWlMQ0owZVhCbElqb2libTl1WlNJc0ltaHZjM1FpT2lKbGJpNWpaRzVqYkc5MVpDNWpieTUxYXlJc0luQmhkR2dpT2lJdlkyRmhZMnh2ZFdRaUxDSjBiSE1pT2lKMGJITWlMQ0p6Ym1raU9pSmxiaTVqWkc1amJHOTFaQzVqYnk1MWF5SjkKdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVEwRXRRU0lzSW1Ga1pDSTZJbU5oYmk1MWEyMWxMbUZ3Y0NJc0luQnZjblFpT2lJeE1EVTFNQ0lzSW1sa0lqb2lPVEE0WldJMU56Z3RNalUxTWkwek9HVTNMV0V4TkRRdE9HVTNZVGMzTmpBd09EQXdJaXdpWVdsa0lqb2lNaUlzSW01bGRDSTZJbmR6SWl3aWRIbHdaU0k2SW01dmJtVWlMQ0pvYjNOMElqb2lZMkZoTG5WcmJXVXVZWEJ3SWl3aWNHRjBhQ0k2SWk5allXRmpiRzkxWkNJc0luUnNjeUk2SW5Sc2N5SXNJbk51YVNJNkltTmhZUzUxYTIxbExtRndjQ0o5CnZtZXNzOi8vZXlKMklqb2lNaUlzSW5Ceklqb2lSRVV0UVNJc0ltRmtaQ0k2SW1SbFl5NTFhMjFsTG1Gd2NDSXNJbkJ2Y25RaU9pSTFOak1pTENKcFpDSTZJamt3T0dWaU5UYzRMVEkxTlRJdE16aGxOeTFoTVRRMExUaGxOMkUzTnpZd01EZ3dNQ0lzSW1GcFpDSTZJaklpTENKdVpYUWlPaUozY3lJc0luUjVjR1VpT2lKdWIyNWxJaXdpYUc5emRDSTZJbVJsWWk1MWEyMWxMbUZ3Y0NJc0luQmhkR2dpT2lJdmNuVmhZMnh2ZFdRaUxDSjBiSE1pT2lKMGJITWlMQ0p6Ym1raU9pSmtaV0l1ZFd0dFpTNWhjSEFpZlE9PQp2bWVzczovL2V5SjJJam9pTWlJc0luQnpJam9pUlZNdFFTSXNJbUZrWkNJNkltVnpZUzUxYTIxbExtRndjQ0lzSW5CdmNuUWlPaUkzT0RNaUxDSnBaQ0k2SWprd09HVmlOVGM0TFRJMU5USXRNemhsTnkxaE1UUTBMVGhsTjJFM056WXdNRGd3TUNJc0ltRnBaQ0k2SWpJaUxDSnVaWFFpT2lKM2N5SXNJblI1Y0dVaU9pSnViMjVsSWl3aWFHOXpkQ0k2SW1WellpNTFhMjFsTG1Gd2NDSXNJbkJoZEdnaU9pSXZaWE5oWTJ4dmRXUWlMQ0owYkhNaU9pSjBiSE1pTENKemJta2lPaUpsYzJJdWRXdHRaUzVoY0hBaWZRPT0Kdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVNFc3RRU0lzSW1Ga1pDSTZJbWhyWkRFdWRXdHRaUzVoY0hBaUxDSndiM0owSWpvaU56Y3pJaXdpYVdRaU9pSTVNRGhsWWpVM09DMHlOVFV5TFRNNFpUY3RZVEUwTkMwNFpUZGhOemMyTURBNE1EQWlMQ0poYVdRaU9pSXlJaXdpYm1WMElqb2lkM01pTENKMGVYQmxJam9pYm05dVpTSXNJbWh2YzNRaU9pSm9hMlF1ZFd0dFpTNWhjSEFpTENKd1lYUm9Jam9pTDJwd1lXTnNiM1ZrSWl3aWRHeHpJam9pZEd4eklpd2ljMjVwSWpvaWFHdGtMblZyYldVdVlYQndJbjA9CnZtZXNzOi8vZXlKMklqb2lNaUlzSW5Ceklqb2lTRXN0UnlJc0ltRmtaQ0k2SW1oclp6RXVkV3R0WlM1aGNIQWlMQ0p3YjNKMElqb2lOall6SWl3aWFXUWlPaUk1TURobFlqVTNPQzB5TlRVeUxUTTRaVGN0WVRFME5DMDRaVGRoTnpjMk1EQTRNREFpTENKaGFXUWlPaUl5SWl3aWJtVjBJam9pZDNNaUxDSjBlWEJsSWpvaWJtOXVaU0lzSW1odmMzUWlPaUpvYTJjdWRXdHRaUzVoY0hBaUxDSndZWFJvSWpvaUwycHdZV05zYjNWa0lpd2lkR3h6SWpvaWRHeHpJaXdpYzI1cElqb2lhR3RuTG5WcmJXVXVZWEJ3SW4wPQp2bWVzczovL2V5SjJJam9pTWlJc0luQnpJam9pU1VRdFFTSXNJbUZrWkNJNkltbGtZUzUxYTIxbExtRndjQ0lzSW5CdmNuUWlPaUl4TkRRMUlpd2lhV1FpT2lJNU1EaGxZalUzT0MweU5UVXlMVE00WlRjdFlURTBOQzA0WlRkaE56YzJNREE0TURBaUxDSmhhV1FpT2lJeUlpd2libVYwSWpvaWQzTWlMQ0owZVhCbElqb2libTl1WlNJc0ltaHZjM1FpT2lKcFpHSXVkV3R0WlM1aGNIQWlMQ0p3WVhSb0lqb2lMMmxrWTJ4dmRXUWlMQ0owYkhNaU9pSjBiSE1pTENKemJta2lPaUpwWkdJdWRXdHRaUzVoY0hBaWZRPT0Kdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVNVNHRRU0lzSW1Ga1pDSTZJbWx1WWk1MWEyMWxMbUZ3Y0NJc0luQnZjblFpT2lJeE5EUTNJaXdpYVdRaU9pSTVNRGhsWWpVM09DMHlOVFV5TFRNNFpUY3RZVEUwTkMwNFpUZGhOemMyTURBNE1EQWlMQ0poYVdRaU9pSXdJaXdpYm1WMElqb2lkM01pTENKMGVYQmxJam9pYm05dVpTSXNJbWh2YzNRaU9pSnBibUV1ZFd0dFpTNWhjSEFpTENKd1lYUm9Jam9pTDNWellXTnNiM1ZrSWl3aWRHeHpJam9pZEd4eklpd2ljMjVwSWpvaWFXNWhMblZyYldVdVlYQndJbjA9CnZtZXNzOi8vZXlKMklqb2lNaUlzSW5Ceklqb2lTbEF0UVNJc0ltRmtaQ0k2SW1wd1lTNTFhMjFsTG1Gd2NDSXNJbkJ2Y25RaU9pSXhNRFUxTlNJc0ltbGtJam9pT1RBNFpXSTFOemd0TWpVMU1pMHpPR1UzTFdFeE5EUXRPR1UzWVRjM05qQXdPREF3SWl3aVlXbGtJam9pTWlJc0ltNWxkQ0k2SW5keklpd2lkSGx3WlNJNkltNXZibVVpTENKb2IzTjBJam9pYW5CaUxuVnJiV1V1WVhCd0lpd2ljR0YwYUNJNklpOXFjR0ZqYkc5MVpDSXNJblJzY3lJNkluUnNjeUlzSW5OdWFTSTZJbXB3WWk1MWEyMWxMbUZ3Y0NKOQp2bWVzczovL2V5SjJJam9pTWlJc0luQnpJam9pU2xBdFFpSXNJbUZrWkNJNkltcHdZeTUxYTIxbExtRndjQ0lzSW5CdmNuUWlPaUl4TURVMU5TSXNJbWxrSWpvaU9UQTRaV0kxTnpndE1qVTFNaTB6T0dVM0xXRXhORFF0T0dVM1lUYzNOakF3T0RBd0lpd2lZV2xrSWpvaU1pSXNJbTVsZENJNkluZHpJaXdpZEhsd1pTSTZJbTV2Ym1VaUxDSm9iM04wSWpvaWFuQmlMblZyYldVdVlYQndJaXdpY0dGMGFDSTZJaTlxY0dGamJHOTFaQ0lzSW5Sc2N5STZJblJzY3lJc0luTnVhU0k2SW1wd1lpNTFhMjFsTG1Gd2NDSjkKdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVMxSXRRU0lzSW1Ga1pDSTZJbXR5WWk1MWEyMWxMbUZ3Y0NJc0luQnZjblFpT2lJMk5UTWlMQ0pwWkNJNklqa3dPR1ZpTlRjNExUSTFOVEl0TXpobE55MWhNVFEwTFRobE4yRTNOell3TURnd01DSXNJbUZwWkNJNklqSWlMQ0p1WlhRaU9pSjNjeUlzSW5SNWNHVWlPaUp1YjI1bElpd2lhRzl6ZENJNkltdHlZUzUxYTIxbExtRndjQ0lzSW5CaGRHZ2lPaUl2WTJGaFkyeHZkV1FpTENKMGJITWlPaUowYkhNaUxDSnpibWtpT2lKcmNtRXVkV3R0WlM1aGNIQWlmUT09CnZtZXNzOi8vZXlKMklqb2lNaUlzSW5Ceklqb2lUVmt0UVNJc0ltRmtaQ0k2SW0xNVlpNTFhMjFsTG1Gd2NDSXNJbkJ2Y25RaU9pSTFPRE1pTENKcFpDSTZJamt3T0dWaU5UYzRMVEkxTlRJdE16aGxOeTFoTVRRMExUaGxOMkUzTnpZd01EZ3dNQ0lzSW1GcFpDSTZJaklpTENKdVpYUWlPaUozY3lJc0luUjVjR1VpT2lKdWIyNWxJaXdpYUc5emRDSTZJbTE1WVM1MWEyMWxMbUZ3Y0NJc0luQmhkR2dpT2lJdlkyRmhZMnh2ZFdRaUxDSjBiSE1pT2lKMGJITWlMQ0p6Ym1raU9pSnRlV0V1ZFd0dFpTNWhjSEFpZlE9PQp2bWVzczovL2V5SjJJam9pTWlJc0luQnpJam9pVUVndFFTSXNJbUZrWkNJNkluQm9ZaTUxYTIxbExtRndjQ0lzSW5CdmNuUWlPaUl4TkRRMklpd2lhV1FpT2lJNU1EaGxZalUzT0MweU5UVXlMVE00WlRjdFlURTBOQzA0WlRkaE56YzJNREE0TURBaUxDSmhhV1FpT2lJd0lpd2libVYwSWpvaWQzTWlMQ0owZVhCbElqb2libTl1WlNJc0ltaHZjM1FpT2lKd2FHRXVkV3R0WlM1aGNIQWlMQ0p3WVhSb0lqb2lMM1Z6WVdOc2IzVmtJaXdpZEd4eklqb2lkR3h6SWl3aWMyNXBJam9pY0doaExuVnJiV1V1WVhCd0luMD0Kdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVVsVXRRU0lzSW1Ga1pDSTZJbkoxWXk1MWEyMWxMbUZ3Y0NJc0luQnZjblFpT2lJeE1EVTFOaUlzSW1sa0lqb2lPVEE0WldJMU56Z3RNalUxTWkwek9HVTNMV0V4TkRRdE9HVTNZVGMzTmpBd09EQXdJaXdpWVdsa0lqb2lNaUlzSW01bGRDSTZJbmR6SWl3aWRIbHdaU0k2SW01dmJtVWlMQ0pvYjNOMElqb2ljblZoTG5WcmJXVXVZWEJ3SWl3aWNHRjBhQ0k2SWk5eWRXRmpiRzkxWkNJc0luUnNjeUk2SW5Sc2N5SXNJbk51YVNJNkluSjFZUzUxYTIxbExtRndjQ0o5CnZtZXNzOi8vZXlKMklqb2lNaUlzSW5Ceklqb2lVMGN0UVNJc0ltRmtaQ0k2SW5ObllpNTFhMjFsTG1Gd2NDSXNJbkJ2Y25RaU9pSTFOak1pTENKcFpDSTZJamt3T0dWaU5UYzRMVEkxTlRJdE16aGxOeTFoTVRRMExUaGxOMkUzTnpZd01EZ3dNQ0lzSW1GcFpDSTZJaklpTENKdVpYUWlPaUozY3lJc0luUjVjR1VpT2lKdWIyNWxJaXdpYUc5emRDSTZJbk5uWVM1MWEyMWxMbUZ3Y0NJc0luQmhkR2dpT2lJdmNuVmhZMnh2ZFdRaUxDSjBiSE1pT2lKMGJITWlMQ0p6Ym1raU9pSnpaMkV1ZFd0dFpTNWhjSEFpZlE9PQp2bWVzczovL2V5SjJJam9pTWlJc0luQnpJam9pVkVndFFTSXNJbUZrWkNJNkluUm9ZaTUxYTIxbExtRndjQ0lzSW5CdmNuUWlPaUkyTkRNaUxDSnBaQ0k2SWprd09HVmlOVGM0TFRJMU5USXRNemhsTnkxaE1UUTBMVGhsTjJFM056WXdNRGd3TUNJc0ltRnBaQ0k2SWpJaUxDSnVaWFFpT2lKM2N5SXNJblI1Y0dVaU9pSnViMjVsSWl3aWFHOXpkQ0k2SW5Sb1lTNTFhMjFsTG1Gd2NDSXNJbkJoZEdnaU9pSXZZMkZoWTJ4dmRXUWlMQ0owYkhNaU9pSjBiSE1pTENKemJta2lPaUowYUdFdWRXdHRaUzVoY0hBaWZRPT0Kdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVZGY3RRU0lzSW1Ga1pDSTZJblIzWXk1MWEyMWxMbUZ3Y0NJc0luQnZjblFpT2lJMk9ETWlMQ0pwWkNJNklqa3dPR1ZpTlRjNExUSTFOVEl0TXpobE55MWhNVFEwTFRobE4yRTNOell3TURnd01DSXNJbUZwWkNJNklqSWlMQ0p1WlhRaU9pSjNjeUlzSW5SNWNHVWlPaUp1YjI1bElpd2lhRzl6ZENJNkluUjNZaTUxYTIxbExtRndjQ0lzSW5CaGRHZ2lPaUl2YW5CaFkyeHZkV1FpTENKMGJITWlPaUowYkhNaUxDSnpibWtpT2lKMGQySXVkV3R0WlM1aGNIQWlmUT09CnZtZXNzOi8vZXlKMklqb2lNaUlzSW5Ceklqb2lWVXN0UVNJc0ltRmtaQ0k2SW5WcllTNTFhMjFsTG1Gd2NDSXNJbkJ2Y25RaU9pSTFORE1pTENKcFpDSTZJamt3T0dWaU5UYzRMVEkxTlRJdE16aGxOeTFoTVRRMExUaGxOMkUzTnpZd01EZ3dNQ0lzSW1GcFpDSTZJaklpTENKdVpYUWlPaUozY3lJc0luUjVjR1VpT2lKdWIyNWxJaXdpYUc5emRDSTZJblZyWWk1MWEyMWxMbUZ3Y0NJc0luQmhkR2dpT2lJdmNuVmhZMnh2ZFdRaUxDSjBiSE1pT2lKMGJITWlMQ0p6Ym1raU9pSjFhMkl1ZFd0dFpTNWhjSEFpZlE9PQp2bWVzczovL2V5SjJJam9pTWlJc0luQnpJam9pVlZNdFFTSXNJbUZrWkNJNkluVnpZaTUxYTIxbExtRndjQ0lzSW5CdmNuUWlPaUl4TURVMU9DSXNJbWxrSWpvaU9UQTRaV0kxTnpndE1qVTFNaTB6T0dVM0xXRXhORFF0T0dVM1lUYzNOakF3T0RBd0lpd2lZV2xrSWpvaU1pSXNJbTVsZENJNkluZHpJaXdpZEhsd1pTSTZJbTV2Ym1VaUxDSm9iM04wSWpvaWRYTmhMblZyYldVdVlYQndJaXdpY0dGMGFDSTZJaTkxYzJGamJHOTFaQ0lzSW5Sc2N5STZJblJzY3lJc0luTnVhU0k2SW5WellTNTFhMjFsTG1Gd2NDSjkKdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVZWTXRSU0lzSW1Ga1pDSTZJblZ6WlRFdWRXdHRaUzVoY0hBaUxDSndiM0owSWpvaU5qVXpJaXdpYVdRaU9pSTVNRGhsWWpVM09DMHlOVFV5TFRNNFpUY3RZVEUwTkMwNFpUZGhOemMyTURBNE1EQWlMQ0poYVdRaU9pSXlJaXdpYm1WMElqb2lkM01pTENKMGVYQmxJam9pYm05dVpTSXNJbWh2YzNRaU9pSjFjMlV1ZFd0dFpTNWhjSEFpTENKd1lYUm9Jam9pTDNWellXTnNiM1ZrSWl3aWRHeHpJam9pZEd4eklpd2ljMjVwSWpvaWRYTmxMblZyYldVdVlYQndJbjA9CnZtZXNzOi8vZXlKMklqb2lNaUlzSW5Ceklqb2lWVk10UnlJc0ltRmtaQ0k2SW5Welp6RXVkV3R0WlM1aGNIQWlMQ0p3YjNKMElqb2lOelV6SWl3aWFXUWlPaUk1TURobFlqVTNPQzB5TlRVeUxUTTRaVGN0WVRFME5DMDRaVGRoTnpjMk1EQTRNREFpTENKaGFXUWlPaUl5SWl3aWJtVjBJam9pZDNNaUxDSjBlWEJsSWpvaWJtOXVaU0lzSW1odmMzUWlPaUoxYzJjdWRXdHRaUzVoY0hBaUxDSndZWFJvSWpvaUwzVnpZV05zYjNWa0lpd2lkR3h6SWpvaWRHeHpJaXdpYzI1cElqb2lkWE5uTG5WcmJXVXVZWEJ3SW4wPQp2bWVzczovL2V5SjJJam9pTWlJc0luQnpJam9pVlZNdFNDSXNJbUZrWkNJNkluVnphREV1ZFd0dFpTNWhjSEFpTENKd2IzSjBJam9pT0Rneklpd2lhV1FpT2lJNU1EaGxZalUzT0MweU5UVXlMVE00WlRjdFlURTBOQzA0WlRkaE56YzJNREE0TURBaUxDSmhhV1FpT2lJeUlpd2libVYwSWpvaWQzTWlMQ0owZVhCbElqb2libTl1WlNJc0ltaHZjM1FpT2lKMWMyZ3VkV3R0WlM1aGNIQWlMQ0p3WVhSb0lqb2lMM1Z6WVdOc2IzVmtJaXdpZEd4eklqb2lkR3h6SWl3aWMyNXBJam9pZFhOb0xuVnJiV1V1WVhCd0luMD0Kdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVZWTXRUaUlzSW1Ga1pDSTZJblZ6YmpFdWRXdHRaUzVoY0hBaUxDSndiM0owSWpvaU5qY3pJaXdpYVdRaU9pSTVNRGhsWWpVM09DMHlOVFV5TFRNNFpUY3RZVEUwTkMwNFpUZGhOemMyTURBNE1EQWlMQ0poYVdRaU9pSXlJaXdpYm1WMElqb2lkM01pTENKMGVYQmxJam9pYm05dVpTSXNJbWh2YzNRaU9pSjFjMjR1ZFd0dFpTNWhjSEFpTENKd1lYUm9Jam9pTDNWellXTnNiM1ZrSWl3aWRHeHpJam9pZEd4eklpd2ljMjVwSWpvaWRYTnVMblZyYldVdVlYQndJbjA9CnZtZXNzOi8vZXlKMklqb2lNaUlzSW5Ceklqb2lWVk10VXkxSFdpSXNJbUZrWkNJNkltRm9MbU5rYm1Oc2IzVmtMbU52TG5Wcklpd2ljRzl5ZENJNklqRXdOVFV6SWl3aWFXUWlPaUk1TURobFlqVTNPQzB5TlRVeUxUTTRaVGN0WVRFME5DMDRaVGRoTnpjMk1EQTRNREFpTENKaGFXUWlPaUl5SWl3aWJtVjBJam9pZDNNaUxDSjBlWEJsSWpvaWJtOXVaU0lzSW1odmMzUWlPaUpsYmk1alpHNWpiRzkxWkM1amJ5NTFheUlzSW5CaGRHZ2lPaUl2WTJGaFkyeHZkV1FpTENKMGJITWlPaUowYkhNaUxDSnpibWtpT2lKbGJpNWpaRzVqYkc5MVpDNWpieTUxYXlKOQp2bWVzczovL2V5SjJJam9pTWlJc0luQnpJam9pVlZNdFV5MUlUaUlzSW1Ga1pDSTZJbUZ6TG1Oa2JtTnNiM1ZrTG1OdkxuVnJJaXdpY0c5eWRDSTZJakV3TlRVeklpd2lhV1FpT2lJNU1EaGxZalUzT0MweU5UVXlMVE00WlRjdFlURTBOQzA0WlRkaE56YzJNREE0TURBaUxDSmhhV1FpT2lJeUlpd2libVYwSWpvaWQzTWlMQ0owZVhCbElqb2libTl1WlNJc0ltaHZjM1FpT2lKbGJpNWpaRzVqYkc5MVpDNWpieTUxYXlJc0luQmhkR2dpT2lJdlkyRmhZMnh2ZFdRaUxDSjBiSE1pT2lKMGJITWlMQ0p6Ym1raU9pSmxiaTVqWkc1amJHOTFaQzVqYnk1MWF5SjkKdm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaVZrNHRRU0lzSW1Ga1pDSTZJblp1WWk1MWEyMWxMbUZ3Y0NJc0luQnZjblFpT2lJMU56TWlMQ0pwWkNJNklqa3dPR1ZpTlRjNExUSTFOVEl0TXpobE55MWhNVFEwTFRobE4yRTNOell3TURnd01DSXNJbUZwWkNJNklqSWlMQ0p1WlhRaU9pSjNjeUlzSW5SNWNHVWlPaUp1YjI1bElpd2lhRzl6ZENJNkluWnVZUzUxYTIxbExtRndjQ0lzSW5CaGRHZ2lPaUl2ZG01aFkyeHZkV1FpTENKMGJITWlPaUowYkhNaUxDSnpibWtpT2lKMmJtRXVkV3R0WlM1aGNIQWlmUT09CnZtZXNzOi8vYm5Wc2JBPT0Kdm1lc3M6Ly9leUp3Y3lJNkl1ZTdyZWkwdWVlOWtlV2RnRG9nWjNOekxtOXlaeTUxYXlJc0ltRmtaQ0k2SW1kemN5NXRaUzUxYXlKOQp2bWVzczovL2V5SndjeUk2SXVXSXNPYWNuK2FaZ3VtV2t6b2dNakF5TlMwd015MHdPQ0lzSW1Ga1pDSTZJbWR6Y3k1dFpTNTFheUo5Cg=="
+        decode1 = b64decode(data).decode('utf-8')
+        # fo.write(decode1)
+
+        for decode2 in decode1.split('\n'):
+            decode2 = b64decode(decode2.replace("vmess://", "")).decode('utf-8')
+            # print(decode2)
+            fo.write("vmess://" + decode2)
+
+
+def convert_vmess_to_yaml(vmess_list):
+    proxies = []
+    for vmess in vmess_list:
+        vmess = vmess.strip()  # 去除空白字符
+        if not vmess.startswith("vmess://"):
+            print(f"Skipping invalid entry (does not start with vmess://): {vmess}")
+            continue
+
+        # 检查是否是无效的 "null" 或其他不合适的格式
+        if vmess == "vmess://null":
+            print(f"Skipping invalid vmess entry: {vmess}")
+            continue
+
+        # 解析vmess URL
+        try:
+            # 去掉 "vmess://" 前缀并解码
+            decoded_data = json.loads(vmess[7:])  # 去掉 "vmess://"
+
+            # 确保解码的数据包含必要的字段
+            if all(key in decoded_data for key in
+                   ["ps", "add", "port", "id", "aid", "net", "type", "host", "path", "tls", "sni"]):
+                proxy = {
+                    "name": decoded_data["ps"],
+                    "server": decoded_data["add"],
+                    "port": decoded_data["port"],
+                    "uuid": decoded_data["id"],
+                    "alterId": int(decoded_data["aid"]),
+                    "network": decoded_data["net"],
+                    "type": decoded_data["type"],
+                    "host": decoded_data["host"],
+                    "path": decoded_data["path"],
+                    "tls": True if decoded_data["tls"] == "tls" else False,
+                    "sni": decoded_data["sni"]
+                }
+                proxies.append(proxy)
+            else:
+                print(f"Missing necessary fields in entry: {vmess}")
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"Error decoding or missing key in vmess entry: {vmess} | Error: {e}")
+    return proxies
+
+
+# 读取vmess配置列表 (每一行是一个vmess链接)
+def read_vmess_file(file_path):
+    with open(file_path, 'r') as f:
+        vmess_list = f.readlines()
+    return vmess_list
+
+
+# 写入YAML文件
+def write_yaml_file(proxies, output_path):
+    with open(output_path, 'w') as f:
+        yaml.dump({"proxies": proxies}, f, default_flow_style=False, allow_unicode=True)
+
+
+# 主函数
+def main(input_file, output_file):
+    vmess_list = read_vmess_file(input_file)
+    proxies = convert_vmess_to_yaml(vmess_list)
+    write_yaml_file(proxies, output_file)
+    print(f"Converted YAML file has been saved to: {output_file}")
+
+
+if __name__ == '__main__':
+    input_file = "url.txt"
+    get_data(input_file)
+    output_file = "url.yaml"
+    main(input_file, output_file)
